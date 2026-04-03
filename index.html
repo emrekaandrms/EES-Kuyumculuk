@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EES Kuyumculuk | Premium Koleksiyon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container nav-wrap">
+        <div class="brand">EES Kuyumculuk</div>
+        <nav>
+          <a href="#home">Home</a>
+          <a href="#collection">Collection</a>
+          <a href="#about">About</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section id="home" class="hero">
+        <div class="hero-overlay"></div>
+        <canvas id="hero3d"></canvas>
+        <div class="container hero-content">
+          <p class="eyebrow">Fine Jewelry Atelier</p>
+          <h1>Zamansiz Formlar, Iscilikte Mutlak Denge</h1>
+          <p>
+            Koleksiyonumuz sade luks anlayisiyla olusturuldu. Her parca, malzeme kalitesi
+            ve zarif detaylarla butik bir deneyim sunar.
+          </p>
+          <a class="hero-cta" href="#collection">Koleksiyonu Kesfet</a>
+        </div>
+      </section>
+
+      <section id="collection" class="collection container">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Collection</p>
+            <h2>Secili Takilar</h2>
+          </div>
+          <div id="priceBadge" class="price-badge">Anlik TRY gram fiyat yukleniyor...</div>
+        </div>
+
+        <div class="filters">
+          <label>
+            Kategori
+            <select id="categoryFilter">
+              <option value="all">Tum Kategoriler</option>
+            </select>
+          </label>
+          <label>
+            Min Gram
+            <input id="minGram" type="number" step="0.01" placeholder="0" />
+          </label>
+          <label>
+            Max Gram
+            <input id="maxGram" type="number" step="0.01" placeholder="50" />
+          </label>
+          <label>
+            Min Fiyat (TRY)
+            <input id="minPrice" type="number" step="1" placeholder="0" />
+          </label>
+          <label>
+            Max Fiyat (TRY)
+            <input id="maxPrice" type="number" step="1" placeholder="500000" />
+          </label>
+          <button id="applyFilters" class="ghost-btn">Filtrele</button>
+        </div>
+
+        <div id="catalog" class="catalog-grid"></div>
+        <div id="loading" class="loading">Urunler yukleniyor...</div>
+      </section>
+
+      <section id="about" class="about container">
+        <p class="eyebrow">About</p>
+        <h2>Butik Zarafet</h2>
+        <p>
+          Platformumuz bir e-ticaret paneli degildir. Bu alan, urunlerinizi premium bir sunumla
+          gostermek ve musterilerinize guclu bir marka deneyimi sunmak icin tasarlandi.
+        </p>
+      </section>
+    </main>
+
+    <div id="stlModal" class="modal">
+      <div class="modal-panel">
+        <button id="closeModal" class="close-btn" type="button">Kapat</button>
+        <div id="viewer3d"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/public/app.js"></script>
+  </body>
+</html>

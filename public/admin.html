@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin | EES Kuyumculuk</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; background: #111; color: #eee; }
+      .card { border: 1px solid #333; border-radius: 10px; padding: 14px; margin-bottom: 14px; background: #1a1a1a; }
+      input, select, button { height: 36px; margin: 4px 0; width: 100%; background: #0f0f0f; color: #eee; border: 1px solid #3a3a3a; border-radius: 6px; padding: 0 8px; }
+      button { cursor: pointer; border-color: #8f6d43; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #2d2d2d; text-align: left; padding: 8px 4px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Admin Panel</h1>
+    <div class="card">
+      <h3>Giris</h3>
+      <input id="password" type="password" placeholder="Admin sifresi" />
+      <button id="loginBtn">Giris Yap</button>
+    </div>
+
+    <div class="card">
+      <h3>Kategori Ekle</h3>
+      <input id="catSlug" placeholder="Slug (ornek: rings)" />
+      <input id="catName" placeholder="Kategori adi" />
+      <input id="catOrder" type="number" placeholder="Sira" />
+      <button id="addCatBtn">Kategori Kaydet</button>
+    </div>
+
+    <div class="card">
+      <h3>Urun Ekle</h3>
+      <input id="pName" placeholder="Urun adi" />
+      <input id="pSlug" placeholder="Slug" />
+      <input id="pCategory" placeholder="Kategori slug" />
+      <input id="pGram" type="number" step="0.01" placeholder="Gram" />
+      <input id="pImage" placeholder="Gorsel yolu (/uploads/images/...)" />
+      <input id="pStl" placeholder="STL yolu (/uploads/models/...)" />
+      <button id="addProductBtn">Urun Kaydet</button>
+    </div>
+
+    <div class="card">
+      <h3>Urunler</h3>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Ad</th><th>Kategori</th><th>Gram</th><th>Durum</th></tr>
+        </thead>
+        <tbody id="productRows"></tbody>
+      </table>
+    </div>
+
+    <script>
+      async function adminFetch(url, options = {}) {
+        const r = await fetch(url, { ...options, headers: { "Content-Type": "application/json" } });
+        if (!r.ok) throw new Error("Istek hatasi");
+        return r.json();
+      }
+
+      async function refreshProducts() {
+        const data = await adminFetch("/api/admin/products");
+        const tbody = document.getElementById("productRows");
+        tbody.innerHTML = "";
+        data.items.forEach((p) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${p.id}</td><td>${p.name}</td><td>${p.category_slug}</td><td>${p.gram}</td><td>${p.is_active ? "Aktif" : "Pasif"}</td>`;
+          tbody.appendChild(tr);
+        });
+      }
+
+      document.getElementById("loginBtn").onclick = async () => {
+        await adminFetch("/api/admin/login", { method: "POST", body: JSON.stringify({ password: document.getElementById("password").value }) });
+        await refreshProducts();
+        alert("Giris basarili");
+      };
+
+      document.getElementById("addCatBtn").onclick = async () => {
+        await adminFetch("/api/admin/categories", {
+          method: "POST",
+          body: JSON.stringify({
+            slug: document.getElementById("catSlug").value,
+            name: document.getElementById("catName").value,
+            sort_order: Number(document.getElementById("catOrder").value || 0)
+          })
+        });
+        alert("Kategori eklendi");
+      };
+
+      document.getElementById("addProductBtn").onclick = async () => {
+        await adminFetch("/api/admin/products", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("pName").value,
+            slug: document.getElementById("pSlug").value,
+            category_slug: document.getElementById("pCategory").value,
+            gram: Number(document.getElementById("pGram").value),
+            image_path: document.getElementById("pImage").value,
+            stl_path: document.getElementById("pStl").value,
+            is_active: 1
+          })
+        });
+        await refreshProducts();
+        alert("Urun eklendi");
+      };
+    </script>
+  </body>
+</html>
