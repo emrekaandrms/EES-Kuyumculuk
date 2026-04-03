@@ -1,13 +1,25 @@
-import * as THREE from "https://unpkg.com/three@0.162.0/build/three.module.js";
-import { STLLoader } from "https://unpkg.com/three@0.162.0/examples/jsm/loaders/STLLoader.js";
-import { OrbitControls } from "https://unpkg.com/three@0.162.0/examples/jsm/controls/OrbitControls.js";
+/**
+ * Katalog ve API her zaman calisir. Three.js yalnizca dinamik import ile yuklenir;
+ * CDN engellenirse bile urun listesi gorunur.
+ */
 
 const state = {
   cursor: null,
-  loading: false,
+  requestInFlight: false,
   done: false,
   filters: { category: "all", minGram: "", maxGram: "", minPrice: "", maxPrice: "" },
 };
+
+let threeCache = null;
+
+async function loadThreeModules() {
+  if (threeCache) return threeCache;
+  const THREE = await import("https://unpkg.com/three@0.162.0/build/three.module.js");
+  const { STLLoader } = await import("https://unpkg.com/three@0.162.0/examples/jsm/loaders/STLLoader.js");
+  const { OrbitControls } = await import("https://unpkg.com/three@0.162.0/examples/jsm/controls/OrbitControls.js");
+  threeCache = { THREE, STLLoader, OrbitControls };
+  return threeCache;
+}
 
 const els = {
   catalog: document.getElementById("catalog"),
@@ -32,6 +44,7 @@ function formatTry(amount) {
 
 async function initCategories() {
   const response = await fetch("/api/categories");
+  if (!response.ok) throw new Error("Kategoriler alinamadi");
   const data = await response.json();
   data.items.forEach((c) => {
     const o = document.createElement("option");
@@ -43,6 +56,7 @@ async function initCategories() {
 
 async function initPricing() {
   const response = await fetch("/api/pricing");
+  if (!response.ok) throw new Error("Fiyat bilgisi alinamadi");
   const data = await response.json();
   els.priceBadge.textContent = `Anlik gram altin: ${formatTry(data.pricePerGramTry)} (${data.currency})`;
 }
@@ -57,41 +71,59 @@ function productCard(item) {
       <p class="meta">Kategori: ${item.category_slug}</p>
       <p class="meta">${Number(item.gram).toFixed(2)} gr</p>
       <p class="meta price">${formatTry(item.priceTry)}</p>
-      ${item.stl_path ? `<button class="stl-btn" data-stl="${item.stl_path}">3D Incele</button>` : ""}
+      ${item.stl_path ? `<button type="button" class="stl-btn" data-stl="${item.stl_path}">3D Incele</button>` : ""}
     </div>
   `;
   return node;
 }
 
 async function fetchProducts(reset = false) {
-  if (state.loading || state.done) return;
-  state.loading = true;
+  if (state.requestInFlight) return;
+  if (!reset && state.done) return;
+  if (reset) {
+    state.done = false;
+    state.cursor = null;
+  }
+  state.requestInFlight = true;
   els.loading.style.display = "block";
 
-  const query = new URLSearchParams({
-    ...state.filters,
-    limit: "24",
-  });
-  if (state.cursor && !reset) {
-    query.set("cursorCreatedAt", state.cursor.createdAt);
-    query.set("cursorId", String(state.cursor.id));
-  }
+  try {
+    const query = new URLSearchParams({
+      ...state.filters,
+      limit: "24",
+    });
+    if (state.cursor && !reset) {
+      query.set("cursorCreatedAt", state.cursor.createdAt);
+      query.set("cursorId", String(state.cursor.id));
+    }
 
-  const response = await fetch(`/api/products?${query.toString()}`);
-  const data = await response.json();
-  if (reset) {
-    els.catalog.innerHTML = "";
-  }
-  data.items.forEach((item) => els.catalog.appendChild(productCard(item)));
-  state.cursor = data.nextCursor;
-  if (!data.nextCursor || data.items.length === 0) {
+    const response = await fetch(`/api/products?${query.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Urunler alinamadi (${response.status})`);
+    }
+    const data = await response.json();
+    if (!Array.isArray(data.items)) {
+      throw new Error("Gecersiz API yaniti");
+    }
+
+    if (reset) {
+      els.catalog.innerHTML = "";
+    }
+    data.items.forEach((item) => els.catalog.appendChild(productCard(item)));
+    state.cursor = data.nextCursor;
+    if (!data.nextCursor || data.items.length === 0) {
+      state.done = true;
+      els.loading.textContent = "Tum urunler yuklendi.";
+    } else {
+      els.loading.textContent = "Asagiya kaydirin — daha fazla urun...";
+    }
+  } catch (err) {
+    console.error(err);
+    els.loading.textContent = "Urunler yuklenemedi. Sayfayi yenileyin veya sunucunun calistigindan emin olun.";
     state.done = true;
-    els.loading.textContent = "Tum urunler yuklendi.";
-  } else {
-    els.loading.textContent = "Urunler yukleniyor...";
+  } finally {
+    state.requestInFlight = false;
   }
-
-  state.loading = false;
 }
 
 function applyFilters() {
@@ -102,8 +134,6 @@ function applyFilters() {
     minPrice: els.minPrice.value,
     maxPrice: els.maxPrice.value,
   };
-  state.cursor = null;
-  state.done = false;
   fetchProducts(true);
 }
 
@@ -114,64 +144,71 @@ function bootInfiniteScroll() {
         fetchProducts(false);
       }
     },
-    { threshold: 0.2 }
+    { root: null, rootMargin: "120px", threshold: 0 }
   );
   observer.observe(els.loading);
 }
 
 let activeRenderer = null;
 let activeAnimation = null;
-function openStlViewer(stlPath) {
-  els.modal.classList.add("open");
-  els.viewer.innerHTML = "";
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0f0f0f);
-  const camera = new THREE.PerspectiveCamera(55, els.viewer.clientWidth / els.viewer.clientHeight, 0.1, 1000);
-  camera.position.set(0, 0, 110);
+async function openStlViewer(stlPath) {
+  try {
+    const { THREE, STLLoader, OrbitControls } = await loadThreeModules();
+    els.modal.classList.add("open");
+    els.viewer.innerHTML = "";
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(els.viewer.clientWidth, els.viewer.clientHeight);
-  els.viewer.appendChild(renderer.domElement);
-  activeRenderer = renderer;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f0f0f);
+    const camera = new THREE.PerspectiveCamera(55, els.viewer.clientWidth / els.viewer.clientHeight, 0.1, 1000);
+    camera.position.set(0, 0, 110);
 
-  scene.add(new THREE.HemisphereLight(0xf4e8d4, 0x181818, 0.7));
-  const dir = new THREE.DirectionalLight(0xffddaa, 1.1);
-  dir.position.set(60, 40, 60);
-  scene.add(dir);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(els.viewer.clientWidth, els.viewer.clientHeight);
+    els.viewer.appendChild(renderer.domElement);
+    activeRenderer = renderer;
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.6;
+    scene.add(new THREE.HemisphereLight(0xf4e8d4, 0x181818, 0.7));
+    const dir = new THREE.DirectionalLight(0xffddaa, 1.1);
+    dir.position.set(60, 40, 60);
+    scene.add(dir);
 
-  const loader = new STLLoader();
-  loader.load(
-    stlPath,
-    (geometry) => {
-      geometry.center();
-      geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(
-        geometry,
-        new THREE.MeshStandardMaterial({ color: 0xbe9463, metalness: 0.9, roughness: 0.3 })
-      );
-      mesh.scale.setScalar(1.2);
-      scene.add(mesh);
-    },
-    undefined,
-    () => {
-      const p = document.createElement("p");
-      p.textContent = "STL yuklenemedi.";
-      els.viewer.appendChild(p);
-    }
-  );
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.6;
 
-  const animate = () => {
-    controls.update();
-    renderer.render(scene, camera);
-    activeAnimation = requestAnimationFrame(animate);
-  };
-  animate();
+    const loader = new STLLoader();
+    loader.load(
+      stlPath,
+      (geometry) => {
+        geometry.center();
+        geometry.computeVertexNormals();
+        const mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshStandardMaterial({ color: 0xbe9463, metalness: 0.9, roughness: 0.3 })
+        );
+        mesh.scale.setScalar(1.2);
+        scene.add(mesh);
+      },
+      undefined,
+      () => {
+        const p = document.createElement("p");
+        p.textContent = "STL yuklenemedi.";
+        els.viewer.appendChild(p);
+      }
+    );
+
+    const animate = () => {
+      controls.update();
+      renderer.render(scene, camera);
+      activeAnimation = requestAnimationFrame(animate);
+    };
+    animate();
+  } catch (e) {
+    console.error(e);
+    alert("3D goruntuleyici yuklenemedi (ag veya tarayici kisitlamasi).");
+  }
 }
 
 function closeStlViewer() {
@@ -181,39 +218,44 @@ function closeStlViewer() {
   activeRenderer = null;
 }
 
-function bootHero3D() {
-  const canvas = document.getElementById("hero3d");
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 0, 55);
-  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.2));
-  const light = new THREE.PointLight(0xffd59f, 1.3);
-  light.position.set(12, 10, 16);
-  scene.add(light);
-
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(9, 2.1, 32, 120),
-    new THREE.MeshStandardMaterial({ color: 0xba9463, metalness: 0.95, roughness: 0.28 })
-  );
-  ring.position.set(15, 2, -8);
-  scene.add(ring);
-
-  const animate = () => {
-    ring.rotation.x += 0.002;
-    ring.rotation.y += 0.004;
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-  };
-  animate();
-
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+async function bootHero3D() {
+  try {
+    const { THREE } = await loadThreeModules();
+    const canvas = document.getElementById("hero3d");
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 55);
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+    const light = new THREE.PointLight(0xffd59f, 1.3);
+    light.position.set(12, 10, 16);
+    scene.add(light);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(9, 2.1, 32, 120),
+      new THREE.MeshStandardMaterial({ color: 0xba9463, metalness: 0.95, roughness: 0.28 })
+    );
+    ring.position.set(15, 2, -8);
+    scene.add(ring);
+
+    const animate = () => {
+      ring.rotation.x += 0.002;
+      ring.rotation.y += 0.004;
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    };
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  } catch (e) {
+    console.warn("Hero 3D atlandi:", e);
+  }
 }
 
 els.applyFilters.addEventListener("click", applyFilters);
@@ -227,9 +269,17 @@ els.catalog.addEventListener("click", (event) => {
   if (button) openStlViewer(button.dataset.stl);
 });
 
-bootHero3D();
-initCategories().then(() => {
-  initPricing();
-  fetchProducts(true);
-  bootInfiniteScroll();
-});
+async function boot() {
+  try {
+    await initCategories();
+    await initPricing();
+    await fetchProducts(true);
+    bootInfiniteScroll();
+  } catch (e) {
+    console.error(e);
+    els.loading.textContent = "Baglanti hatasi: /api erisilemiyor (sunucu calisiyor mu?)";
+  }
+  bootHero3D();
+}
+
+boot();
