@@ -6,6 +6,7 @@ const { db } = require("../db");
 
 const router = express.Router();
 const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
 
 function requireAdmin(req, res, next) {
   if (!req.session?.isAdmin) {
@@ -42,8 +43,7 @@ const upload = multer({
 
 router.post("/login", async (req, res) => {
   const { password } = req.body;
-  const hash = await bcrypt.hash(adminPassword, 8);
-  const ok = await bcrypt.compare(password || "", hash);
+  const ok = await bcrypt.compare(password || "", adminPasswordHash);
   if (!ok) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
@@ -80,14 +80,15 @@ router.post("/products", requireAdmin, (req, res) => {
 
 router.patch("/products/:id", requireAdmin, (req, res) => {
   const id = Number(req.params.id);
-  const { name, category_slug, gram, image_path, stl_path, is_active } = req.body;
+  const { name, slug, category_slug, gram, image_path, stl_path, is_active } = req.body;
   db.prepare(`
     UPDATE products
-    SET name=@name, category_slug=@category_slug, gram=@gram, image_path=@image_path, stl_path=@stl_path, is_active=@is_active
+    SET name=@name, slug=@slug, category_slug=@category_slug, gram=@gram, image_path=@image_path, stl_path=@stl_path, is_active=@is_active
     WHERE id=@id
   `).run({
     id,
     name,
+    slug,
     category_slug,
     gram: Number(gram),
     image_path: image_path || "",
@@ -113,6 +114,11 @@ router.post("/categories", requireAdmin, (req, res) => {
     .prepare("INSERT INTO categories (slug, name, sort_order) VALUES (?, ?, ?)")
     .run(slug, name, Number(sort_order));
   res.json({ id: info.lastInsertRowid });
+});
+
+router.delete("/categories/:id", requireAdmin, (req, res) => {
+  db.prepare("DELETE FROM categories WHERE id = ?").run(Number(req.params.id));
+  res.json({ ok: true });
 });
 
 router.post("/upload", requireAdmin, upload.single("file"), (req, res) => {

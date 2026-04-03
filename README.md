@@ -17,6 +17,8 @@ npm start
 
 Varsayilan admin sifresi: `admin123` (`ADMIN_PASSWORD` ile degistirin).
 
+Admin: sol menuden **Urunler** / **Kategoriler**; gorsel ve STL **dosya sec** ile yuklenir, yol otomatik dolar. Listede **Duzenle** / **Sil**.
+
 ## Ortam Degiskenleri
 
 - `PORT`
