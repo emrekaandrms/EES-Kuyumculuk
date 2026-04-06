@@ -11,7 +11,7 @@ const port = Number(process.env.PORT || 3000);
 
 initDb();
 
-["uploads/images", "uploads/models", "public/placeholders"].forEach((dir) => {
+["uploads/images", "uploads/models", "uploads/temp", "public/placeholders"].forEach((dir) => {
   const abs = path.join(process.cwd(), dir);
   if (!fs.existsSync(abs)) {
     fs.mkdirSync(abs, { recursive: true });

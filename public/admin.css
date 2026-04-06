@@ -411,6 +411,32 @@ tr:hover td {
   }
 }
 
+.csv-help {
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0 0 0.65rem;
+  max-width: 720px;
+}
+
+.csv-help code {
+  color: var(--gold);
+  font-size: 0.85em;
+}
+
+.csv-result {
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  background: #0f0f0f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: #c8c4bc;
+  max-height: 240px;
+}
+
 @media (max-width: 900px) {
   .app {
     flex-direction: column;

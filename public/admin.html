@@ -101,6 +101,25 @@
           </div>
 
           <div class="panel">
+            <h3>Toplu ice aktar (CSV)</h3>
+            <p class="csv-help">
+              Baslik satiri zorunlu. <strong>slug</strong> ayni ise mevcut urun <strong>guncellenir</strong>, yoksa
+              <strong>yeni kayit</strong> eklenir. <code>category_slug</code> once Kategorilerden tanimli olmali.
+              <code>is_active</code>: 1 / 0 veya bos (varsayilan 1).
+            </p>
+            <p class="csv-help">
+              <a href="/public/templates/urun-import-sablonu.csv" download>Ornek sablonu indir</a>
+              ·
+              <a href="/api/admin/products/csv-template" id="csvTemplateAuth">Oturumla sablon indir</a>
+            </p>
+            <div class="upload-zone" style="margin-top: 0.75rem">
+              <input id="csvFile" type="file" accept=".csv,text/csv" />
+              <button id="csvImportBtn" type="button" class="btn btn-primary" style="width: auto; margin-top: 0; height: 42px">CSV Yukle ve Isle</button>
+            </div>
+            <pre id="csvResult" class="csv-result" hidden></pre>
+          </div>
+
+          <div class="panel">
             <h3>Kayitli urunler</h3>
             <div class="table-wrap">
               <table>

@@ -12,13 +12,15 @@ function toast(msg, isError = false) {
 }
 
 async function api(url, options = {}) {
+  const headers = { ...options.headers };
+  const isJsonBody = options.body != null && typeof options.body === "string" && !headers["Content-Type"];
+  if (isJsonBody) {
+    headers["Content-Type"] = "application/json";
+  }
   const r = await fetch(url, {
     ...options,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
   const text = await r.text();
   let data = null;
@@ -28,8 +30,13 @@ async function api(url, options = {}) {
     data = { raw: text };
   }
   if (!r.ok) {
-    const err = new Error(data?.error || r.statusText || "Istek basarisiz");
+    const msg = [data?.error, data?.detail].filter(Boolean).join(" — ") || r.statusText || "Istek basarisiz";
+    const err = new Error(msg);
     err.status = r.status;
+    err.detail = data?.detail;
+    if (r.status === 401) {
+      err.isAuth = true;
+    }
     throw err;
   }
   return data;
@@ -153,8 +160,18 @@ async function uploadFile(file) {
     credentials: "include",
   });
   const text = await r.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!r.ok) throw new Error(data.error || "Yukleme basarisiz");
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text?.slice(0, 120) || "Yukleme yaniti okunamadi");
+  }
+  if (!r.ok) {
+    const msg = [data.error, data.detail].filter(Boolean).join(" — ") || "Yukleme basarisiz";
+    const e = new Error(msg);
+    e.isAuth = r.status === 401;
+    throw e;
+  }
   return data.path;
 }
 
@@ -180,7 +197,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
     await refreshProductTable();
     toast("Hos geldiniz");
   } catch (e) {
-    toast("Sifre hatali veya baglanti sorunu", true);
+    toast(e.message || "Sifre hatali veya baglanti sorunu", true);
   }
 });
 
@@ -230,6 +247,9 @@ document.getElementById("imageFile").addEventListener("change", async (e) => {
     toast("Gorsel yuklendi");
   } catch (err) {
     toast(err.message, true);
+    if (err.isAuth) {
+      toast("Oturum yok veya sunucu durdu — npm start ile sunucuyu calistirin, tekrar giris yapin.", true);
+    }
   }
   e.target.value = "";
 });
@@ -245,6 +265,9 @@ document.getElementById("stlFile").addEventListener("change", async (e) => {
     toast("STL yuklendi");
   } catch (err) {
     toast(err.message, true);
+    if (err.isAuth) {
+      toast("Oturum yok veya sunucu durdu — npm start ile sunucuyu calistirin, tekrar giris yapin.", true);
+    }
   }
   e.target.value = "";
 });
@@ -291,6 +314,57 @@ document.getElementById("productForm").addEventListener("submit", async (e) => {
 
 document.getElementById("clearProductBtn").addEventListener("click", () => {
   resetProductForm();
+});
+
+document.getElementById("csvImportBtn").addEventListener("click", async () => {
+  const input = document.getElementById("csvFile");
+  const file = input.files?.[0];
+  if (!file) {
+    toast("Once bir CSV dosyasi secin", true);
+    return;
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  const resultEl = document.getElementById("csvResult");
+  resultEl.hidden = true;
+  try {
+    const r = await fetch("/api/admin/products/import-csv", {
+      method: "POST",
+      body: fd,
+      credentials: "include",
+    });
+    const text = await r.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(text?.slice(0, 200) || "Sunucu yaniti gecersiz");
+    }
+    if (!r.ok) {
+      throw new Error([data.error, data.detail].filter(Boolean).join(" — ") || `Hata ${r.status}`);
+    }
+    const { inserted = 0, updated = 0, errors = [], total = 0 } = data;
+    toast(`${inserted} eklendi, ${updated} guncellendi (toplam ${total} satir)`);
+    let report = `Toplam satir: ${total}\nEklenen: ${inserted}\nGuncellenen: ${updated}\n`;
+    if (errors.length) {
+      report += `\nAtlanan / hatali satirlar (${errors.length}):\n`;
+      report += errors.map((e) => `  Satir ${e.line}${e.slug ? ` [${e.slug}]` : ""}: ${e.error}`).join("\n");
+      resultEl.textContent = report;
+      resultEl.hidden = false;
+      alert(
+        `Bazi satirlarda hata var (${errors.length} adet). Detay asagida listelendi. Tum satirlar kontrol edilmeden once kategori sluglarinin tanimli oldugundan emin olun.`
+      );
+    } else {
+      resultEl.hidden = true;
+    }
+    await refreshProductTable();
+  } catch (e) {
+    toast(e.message || "CSV ice aktarilamadi", true);
+    if (e.message?.includes("401") || e.message?.toLowerCase().includes("unauthorized")) {
+      toast("Oturum suresi dolmus olabilir — sayfayi yenileyip tekrar giris yapin.", true);
+    }
+  }
+  input.value = "";
 });
 
 setSection("products");
