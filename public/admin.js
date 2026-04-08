@@ -58,6 +58,12 @@ function setSection(name) {
   $("#section-categories").classList.toggle("section-hidden", name !== "categories");
 }
 
+async function loadPricingSettings() {
+  const data = await api("/api/admin/pricing-settings");
+  $("#pricingMilyem").value = data.milyem ?? 1000;
+  $("#pricingMarkup").value = data.goldMarkupPercent ?? 0;
+}
+
 async function loadCategoriesForSelect() {
   const data = await api("/api/categories");
   const sel = $("#pCategory");
@@ -109,6 +115,7 @@ async function refreshProductTable() {
       <td>${p.name}</td>
       <td>${p.category_slug}</td>
       <td>${p.gram}</td>
+      <td>${p.is_bestseller ? "Evet" : "Hayir"}</td>
       <td>${p.is_active ? "Aktif" : "Pasif"}</td>
       <td>
         <button type="button" class="btn-ghost" data-edit="${p.id}" style="height:36px;padding:0 0.75rem;font-size:0.82rem;">Duzenle</button>
@@ -132,6 +139,7 @@ async function refreshProductTable() {
       $("#pImagePath").value = p.image_path || "";
       $("#pStlPath").value = p.stl_path || "";
       $("#pActive").checked = Boolean(p.is_active);
+      $("#pBestseller").checked = Boolean(p.is_bestseller);
       $("#imagePathHint").textContent = p.image_path || "—";
       $("#stlPathHint").textContent = p.stl_path || "—";
       $("#productSubmit").textContent = "Guncelle";
@@ -167,7 +175,10 @@ async function uploadFile(file) {
     throw new Error(text?.slice(0, 120) || "Yukleme yaniti okunamadi");
   }
   if (!r.ok) {
-    const msg = [data.error, data.detail].filter(Boolean).join(" — ") || "Yukleme basarisiz";
+    let msg = [data.error, data.detail].filter(Boolean).join(" — ") || "Yukleme basarisiz";
+    if (r.status === 401) {
+      msg += " — Cikis yapip tekrar giris deneyin; sorun surerse tarayicida bu site icin cerezlerin acik oldugunu kontrol edin.";
+    }
     const e = new Error(msg);
     e.isAuth = r.status === 401;
     throw e;
@@ -180,6 +191,7 @@ function resetProductForm() {
   $("#productForm").reset();
   $("#pImagePath").value = "";
   $("#pStlPath").value = "";
+  $("#pBestseller").checked = false;
   $("#imagePathHint").textContent = "Dosya secilmedi";
   $("#stlPathHint").textContent = "Dosya secilmedi";
   $("#productSubmit").textContent = "Urunu Kaydet";
@@ -192,6 +204,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
       body: JSON.stringify({ password: $("#password").value }),
     });
     showApp();
+    await loadPricingSettings();
     await loadCategoriesForSelect();
     await refreshCategoryTable();
     await refreshProductTable();
@@ -236,6 +249,20 @@ document.getElementById("addCatBtn").addEventListener("click", async () => {
   }
 });
 
+document.getElementById("savePricingSettingsBtn").addEventListener("click", async () => {
+  const milyem = Number($("#pricingMilyem").value);
+  const goldMarkupPercent = Number($("#pricingMarkup").value);
+  try {
+    await api("/api/admin/pricing-settings", {
+      method: "PUT",
+      body: JSON.stringify({ milyem, goldMarkupPercent }),
+    });
+    toast("Fiyat ayarlari kaydedildi");
+  } catch (e) {
+    toast(e.message || "Fiyat ayarlari kaydedilemedi", true);
+  }
+});
+
 document.getElementById("imageFile").addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -248,7 +275,7 @@ document.getElementById("imageFile").addEventListener("change", async (e) => {
   } catch (err) {
     toast(err.message, true);
     if (err.isAuth) {
-      toast("Oturum yok veya sunucu durdu — npm start ile sunucuyu calistirin, tekrar giris yapin.", true);
+      toast("Oturum yok — sayfayi yenileyip tekrar giris yapin. Sunucuyu yeniden baslattiysaniz da tekrar giris gerekir.", true);
     }
   }
   e.target.value = "";
@@ -266,7 +293,7 @@ document.getElementById("stlFile").addEventListener("change", async (e) => {
   } catch (err) {
     toast(err.message, true);
     if (err.isAuth) {
-      toast("Oturum yok veya sunucu durdu — npm start ile sunucuyu calistirin, tekrar giris yapin.", true);
+      toast("Oturum yok — sayfayi yenileyip tekrar giris yapin. Sunucuyu yeniden baslattiysaniz da tekrar giris gerekir.", true);
     }
   }
   e.target.value = "";
@@ -282,6 +309,7 @@ document.getElementById("productForm").addEventListener("submit", async (e) => {
     image_path: $("#pImagePath").value.trim(),
     stl_path: $("#pStlPath").value.trim(),
     is_active: $("#pActive").checked ? 1 : 0,
+    is_bestseller: $("#pBestseller").checked ? 1 : 0,
   };
   try {
     if (editingProductId) {
@@ -295,6 +323,7 @@ document.getElementById("productForm").addEventListener("submit", async (e) => {
           image_path: payload.image_path,
           stl_path: payload.stl_path,
           is_active: payload.is_active,
+          is_bestseller: payload.is_bestseller,
         }),
       });
       toast("Urun guncellendi");

@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.*
+!.env.example
 *.log
 data/*.db
 data/*.db-shm
@@ -11,3 +12,4 @@ uploads/models/*
 !uploads/models/.gitkeep
 .DS_Store
 Thumbs.db
+exports/

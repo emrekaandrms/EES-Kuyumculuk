@@ -2,13 +2,31 @@ const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
 const express = require("express");
+const { rateLimit } = require("express-rate-limit");
 const multer = require("multer");
 const { db } = require("../db");
 const { importProductsFromCsvText } = require("../importProductsCsv");
 
 const router = express.Router();
-const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (!adminPassword) {
+  throw new Error("ADMIN_PASSWORD is required.");
+}
 const adminPasswordHash = bcrypt.hashSync(adminPassword, 10);
+const loginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Cok fazla giris denemesi. Lutfen 5 dakika sonra tekrar deneyin." },
+});
+const adminApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Cok fazla istek. Lutfen biraz sonra tekrar deneyin." },
+});
 
 function requireAdmin(req, res, next) {
   if (!req.session?.isAdmin) {
@@ -88,15 +106,27 @@ function handleMulterUpload(middleware) {
   };
 }
 
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   const { password } = req.body;
   const ok = await bcrypt.compare(password || "", adminPasswordHash);
   if (!ok) {
-    return res.status(401).json({ error: "Invalid credentials" });
+    return req.session.regenerate(() => res.status(401).json({ error: "Invalid credentials" }));
   }
-  req.session.isAdmin = true;
-  return res.json({ ok: true });
+  return req.session.regenerate((err) => {
+    if (err) {
+      return res.status(500).json({ error: "Session yenilenemedi" });
+    }
+    req.session.isAdmin = true;
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        return res.status(500).json({ error: "Oturum kaydedilemedi" });
+      }
+      return res.json({ ok: true });
+    });
+  });
 });
+
+router.use(adminApiLimiter);
 
 router.post("/logout", requireAdmin, (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
@@ -108,11 +138,11 @@ router.get("/products", requireAdmin, (_req, res) => {
 });
 
 router.post("/products", requireAdmin, (req, res) => {
-  const { name, slug, category_slug, gram, image_path, stl_path, is_active = 1 } = req.body;
+  const { name, slug, category_slug, gram, image_path, stl_path, is_active = 1, is_bestseller = 0 } = req.body;
   try {
     const stmt = db.prepare(`
-      INSERT INTO products (name, slug, category_slug, gram, image_path, stl_path, is_active)
-      VALUES (@name, @slug, @category_slug, @gram, @image_path, @stl_path, @is_active)
+      INSERT INTO products (name, slug, category_slug, gram, image_path, stl_path, is_active, is_bestseller)
+      VALUES (@name, @slug, @category_slug, @gram, @image_path, @stl_path, @is_active, @is_bestseller)
     `);
     const info = stmt.run({
       name,
@@ -122,6 +152,7 @@ router.post("/products", requireAdmin, (req, res) => {
       image_path: image_path || "",
       stl_path: stl_path || "",
       is_active: Number(is_active) ? 1 : 0,
+      is_bestseller: Number(is_bestseller) ? 1 : 0,
     });
     res.json({ id: info.lastInsertRowid });
   } catch (e) {
@@ -138,11 +169,11 @@ router.post("/products", requireAdmin, (req, res) => {
 
 router.patch("/products/:id", requireAdmin, (req, res) => {
   const id = Number(req.params.id);
-  const { name, slug, category_slug, gram, image_path, stl_path, is_active } = req.body;
+  const { name, slug, category_slug, gram, image_path, stl_path, is_active, is_bestseller = 0 } = req.body;
   try {
     db.prepare(`
       UPDATE products
-      SET name=@name, slug=@slug, category_slug=@category_slug, gram=@gram, image_path=@image_path, stl_path=@stl_path, is_active=@is_active
+      SET name=@name, slug=@slug, category_slug=@category_slug, gram=@gram, image_path=@image_path, stl_path=@stl_path, is_active=@is_active, is_bestseller=@is_bestseller
       WHERE id=@id
     `).run({
       id,
@@ -153,6 +184,7 @@ router.patch("/products/:id", requireAdmin, (req, res) => {
       image_path: image_path || "",
       stl_path: stl_path || "",
       is_active: Number(is_active) ? 1 : 0,
+      is_bestseller: Number(is_bestseller) ? 1 : 0,
     });
     res.json({ ok: true });
   } catch (e) {
@@ -193,6 +225,39 @@ router.post("/categories", requireAdmin, (req, res) => {
 router.delete("/categories/:id", requireAdmin, (req, res) => {
   db.prepare("DELETE FROM categories WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true });
+});
+
+router.get("/pricing-settings", requireAdmin, (_req, res) => {
+  const rows = db
+    .prepare("SELECT key, value FROM site_settings WHERE key IN ('pricing_milyem', 'pricing_gold_markup_percent')")
+    .all();
+  const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  const milyem = Number(map.pricing_milyem ?? 1000);
+  const goldMarkupPercent = Number(map.pricing_gold_markup_percent ?? 0);
+  res.json({
+    milyem: Number.isFinite(milyem) && milyem > 0 ? milyem : 1000,
+    goldMarkupPercent: Number.isFinite(goldMarkupPercent) ? goldMarkupPercent : 0,
+  });
+});
+
+router.put("/pricing-settings", requireAdmin, (req, res) => {
+  const milyem = Number(req.body?.milyem);
+  const goldMarkupPercent = Number(req.body?.goldMarkupPercent);
+  if (!Number.isFinite(milyem) || milyem <= 0) {
+    return res.status(400).json({ error: "milyem pozitif bir sayi olmali" });
+  }
+  if (!Number.isFinite(goldMarkupPercent) || goldMarkupPercent < -99 || goldMarkupPercent > 500) {
+    return res.status(400).json({ error: "goldMarkupPercent -99 ile 500 arasinda olmali" });
+  }
+
+  const upsert = db.prepare(`
+    INSERT INTO site_settings (key, value)
+    VALUES (@key, @value)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsert.run({ key: "pricing_milyem", value: String(milyem) });
+  upsert.run({ key: "pricing_gold_markup_percent", value: String(goldMarkupPercent) });
+  return res.json({ ok: true, milyem, goldMarkupPercent });
 });
 
 router.post(

@@ -12,6 +12,14 @@ const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
 
+function ensureColumn(tableName, columnName, columnSql) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const hasColumn = columns.some((column) => column.name === columnName);
+  if (!hasColumn) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnSql}`);
+  }
+}
+
 function initDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS categories (
@@ -35,7 +43,22 @@ function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_slug);
     CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS site_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
+
+  ensureColumn("products", "is_bestseller", "is_bestseller INTEGER NOT NULL DEFAULT 0");
+
+  const upsertSetting = db.prepare(`
+    INSERT INTO site_settings (key, value)
+    VALUES (@key, @value)
+    ON CONFLICT(key) DO NOTHING
+  `);
+  upsertSetting.run({ key: "pricing_milyem", value: "1000" });
+  upsertSetting.run({ key: "pricing_gold_markup_percent", value: "0" });
 }
 
 module.exports = { db, initDb };
